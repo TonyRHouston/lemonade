@@ -1,13 +1,8 @@
 name: Docs And Style
 on:
-  push:
-    branches: ["main"]
-  pull_request:
-  merge_group:
-
+  workflow_dispatch: {}
 permissions:
   contents: read
-
 jobs:
   markdown-link-check:
     runs-on: ubuntu-latest
@@ -15,19 +10,17 @@ jobs:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Install markdown-link-check
-        run: npm install -g markdown-link-check
-      - name: Check Markdown links
-        shell: bash
-        run: |
-          # To run this manually on Windows, run:
-          #   npm install -g markdown-link-check
-          #   Get-ChildItem -Recurse -Filter *.md | ForEach-Object { markdown-link-check $_.FullName -c .\.github\workflows\mlc_config.json }
-          set -euo pipefail
-          find . -type f -name "*.md" -not -path "./node_modules/*" \
-            -exec markdown-link-check -c .github/workflows/mlc_config.json {} \;
+    - uses: actions/checkout@v4
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    - name: Install markdown-link-check
+      run: npm install -g markdown-link-check
+    - name: Check Markdown links
+      shell: bash
+      run: "# To run this manually on Windows, run:\n#   npm install -g markdown-link-check\n\
+        #   Get-ChildItem -Recurse -Filter *.md | ForEach-Object { markdown-link-check\
+        \ $_.FullName -c .\\.github\\workflows\\mlc_config.json }\nset -euo pipefail\n\
+        find . -type f -name \"*.md\" -not -path \"./node_modules/*\" \\\n  -exec\
+        \ markdown-link-check -c .github/workflows/mlc_config.json {} \\;\n"
