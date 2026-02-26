@@ -1,292 +1,160 @@
-name: C++ Server Build, Test, and Release 🚀
-
+name: "C++ Server Build, Test, and Release \U0001F680"
 on:
-  push:
-    branches: ["main"]
-    tags:
-      - v*
-  pull_request:
-  merge_group:
-  workflow_dispatch:
-
+  workflow_dispatch: {}
 permissions:
   contents: write
-
 jobs:
-  # ========================================================================
-  # BUILD JOBS - Run on rai-160-sdk workers
-  # ========================================================================
-
   build-lemonade-server-installer:
     name: Build Lemonade Server Installer
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          clean: true
-          fetch-depth: 0
+    - uses: actions/checkout@v4
+      with:
+        clean: true
+        fetch-depth: 0
+    - name: Install CMake if not available
+      shell: PowerShell
+      run: "# Check if CMake is already installed\n$cmakeInstalled = Get-Command cmake\
+        \ -ErrorAction SilentlyContinue\n\nif (-not $cmakeInstalled) {\n    Write-Host\
+        \ \"CMake not found, installing...\" -ForegroundColor Yellow\n\n    # Download\
+        \ CMake installer\n    $cmakeVersion = \"3.28.1\"\n    $cmakeUrl = \"https://github.com/Kitware/CMake/releases/download/v$cmakeVersion/cmake-$cmakeVersion-windows-x86_64.msi\"\
+        \n    $cmakeInstaller = \"cmake-installer.msi\"\n\n    Invoke-WebRequest -Uri\
+        \ $cmakeUrl -OutFile $cmakeInstaller\n\n    # Install CMake silently\n   \
+        \ Start-Process msiexec.exe -ArgumentList \"/i $cmakeInstaller /quiet /norestart\"\
+        \ -Wait\n\n    # Add CMake to PATH for this session AND future steps\n   \
+        \ $cmakePath = \"C:\\Program Files\\CMake\\bin\"\n    $env:PATH = \"$cmakePath;$env:PATH\"\
+        \n\n    # Persist to GITHUB_PATH for future steps\n    echo $cmakePath >>\
+        \ $env:GITHUB_PATH\n\n    # Verify installation\n    cmake --version\n   \
+        \ if ($LASTEXITCODE -ne 0) {\n        Write-Host \"ERROR: CMake installation\
+        \ failed!\" -ForegroundColor Red\n        exit 1\n    }\n\n    Write-Host\
+        \ \"CMake installed successfully and added to PATH!\" -ForegroundColor Green\n\
+        } else {\n    Write-Host \"CMake is already installed:\" -ForegroundColor\
+        \ Green\n    cmake --version\n}\n"
+    - name: Install WiX Toolset 5.0.2 (CLI)
+      shell: PowerShell
+      run: "$ErrorActionPreference = \"Stop\"\n\nWrite-Host \"Downloading WiX Toolset\
+        \ 5.0.2 CLI...\" -ForegroundColor Cyan\n$wixUri = \"https://github.com/wixtoolset/wix/releases/download/v5.0.2/wix-cli-x64.msi\"\
+        \n$msiPath = \"$env:RUNNER_TEMP\\wix-cli-x64.msi\"\n\nInvoke-WebRequest -UseBasicParsing\
+        \ -Uri $wixUri -OutFile $msiPath\n\nWrite-Host \"Installing WiX Toolset 5.0.2\
+        \ CLI...\" -ForegroundColor Cyan\n$p = Start-Process \"msiexec.exe\" -ArgumentList\
+        \ @(\"/i\", \"`\"$msiPath`\"\", \"/qn\", \"/norestart\") -PassThru -Wait\n\
+        if ($p.ExitCode -ne 0) {\n  Write-Host \"WiX installer exited with code $($p.ExitCode)\"\
+        \ -ForegroundColor Red\n  exit $p.ExitCode\n}\n"
+    - name: Verify WiX installation
+      shell: PowerShell
+      run: "$ErrorActionPreference = \"Stop\"\n\n# WiX CLI MSI does not always add\
+        \ itself to PATH in non-interactive installs,\n# so we locate it explicitly\
+        \ and then update PATH for subsequent steps.\n$wixDirs = @(\n  \"C:\\Program\
+        \ Files\\WiX Toolset v5.0\\bin\",\n  \"C:\\Program Files (x86)\\WiX Toolset\
+        \ v5.0\\bin\"\n)\n\n$wixExe = $null\nforeach ($dir in $wixDirs) {\n  if (Test-Path\
+        \ (Join-Path $dir \"wix.exe\")) {\n    $wixExe = Join-Path $dir \"wix.exe\"\
+        \n    break\n  }\n}\n\nif (-not $wixExe) {\n  Write-Host \"ERROR: wix.exe\
+        \ not found after installation.\" -ForegroundColor Red\n  Get-ChildItem -Recurse\
+        \ \"C:\\Program Files\" -Filter wix.exe -ErrorAction SilentlyContinue | Select-Object\
+        \ -First 20 | Format-List FullName\n  exit 1\n}\n\n$wixDir = Split-Path $wixExe\
+        \ -Parent\n\n# Persist wix.exe directory to PATH for all subsequent steps\n\
+        \"$wixDir\" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append\n\
+        \nWrite-Host \"Using WiX from: $wixExe\" -ForegroundColor Green\n& $wixExe\
+        \ --version\n"
+    - name: Build C++ Server with CMake
+      shell: PowerShell
+      run: "$ErrorActionPreference = \"Stop\"\n\nWrite-Host \"Building lemonade-router\
+        \ and lemonade-server...\" -ForegroundColor Cyan\n\ncd src\\cpp\n\n# Create\
+        \ build directory\nif (Test-Path \"build\") {\n    Remove-Item -Recurse -Force\
+        \ \"build\"\n}\nmkdir build\ncd build\n\n# Configure\ncmake .. -G \"Visual\
+        \ Studio 17 2022\" -A x64\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n\
+        \n# Build\ncmake --build . --config Release\nif ($LASTEXITCODE -ne 0) { exit\
+        \ $LASTEXITCODE }\n\n# Verify binaries exist\nif (-not (Test-Path \"Release\\\
+        lemonade-router.exe\")) {\n    Write-Host \"ERROR: lemonade-router.exe not\
+        \ found!\" -ForegroundColor Red\n    exit 1\n}\n\nif (-not (Test-Path \"Release\\\
+        lemonade-server.exe\")) {\n    Write-Host \"ERROR: lemonade-server.exe not\
+        \ found!\" -ForegroundColor Red\n    exit 1\n}\n\nif (-not (Test-Path \"Release\\\
+        lemonade-tray.exe\")) {\n    Write-Host \"ERROR: lemonade-tray.exe not found!\"\
+        \ -ForegroundColor Red\n    exit 1\n}\n\nWrite-Host \"C++ build successful!\"\
+        \ -ForegroundColor Green\n"
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    - name: Build Electron App
+      shell: PowerShell
+      run: "$ErrorActionPreference = \"Stop\"\n\nWrite-Host \"Building Electron app...\"\
+        \ -ForegroundColor Cyan\n\ncd src\\app\n\n# Install dependencies\nWrite-Host\
+        \ \"Installing npm dependencies...\" -ForegroundColor Yellow\nnpm install\n\
+        if ($LASTEXITCODE -ne 0) {\n    Write-Host \"ERROR: npm install failed!\"\
+        \ -ForegroundColor Red\n    exit $LASTEXITCODE\n}\n\n# Build the Electron\
+        \ app for Windows\nWrite-Host \"Building Electron app for Windows...\" -ForegroundColor\
+        \ Yellow\nnpm run build:win\nif ($LASTEXITCODE -ne 0) {\n    Write-Host \"\
+        ERROR: Electron app build failed!\" -ForegroundColor Red\n    exit $LASTEXITCODE\n\
+        }\n\n# Verify the build output exists\nif (-not (Test-Path \"dist-app\\win-unpacked\\\
+        Lemonade.exe\")) {\n    Write-Host \"ERROR: Electron app executable not found!\"\
+        \ -ForegroundColor Red\n    exit 1\n}\n\nWrite-Host \"Electron app build successful!\"\
+        \ -ForegroundColor Green\n"
+    - name: Build the Lemonade Server Installer
+      shell: PowerShell
+      run: "$ErrorActionPreference = \"Stop\"\n\ncd src\\cpp\n\n# Run the build installer\
+        \ script\n.\\build_installer.ps1\n\n# Verify installers were created\nif (-not\
+        \ (Test-Path \"lemonade-server-minimal.msi\")) {\n    Write-Host \"ERROR:\
+        \ Minimal installer not created!\" -ForegroundColor Red\n    exit 1\n}\n\n\
+        if (-not (Test-Path \"lemonade.msi\")) {\n    Write-Host \"ERROR: Full installer\
+        \ not created!\" -ForegroundColor Red\n    exit 1\n}\n\nWrite-Host \"Installers\
+        \ created successfully!\" -ForegroundColor Green\n"
+    - name: Upload Lemonade Server Installers
+      uses: actions/upload-artifact@v4
+      with:
+        name: Lemonade_Server_MSI
+        path: 'src\cpp\lemonade-server-minimal.msi
 
-      - name: Install CMake if not available
-        shell: PowerShell
-        run: |
-          # Check if CMake is already installed
-          $cmakeInstalled = Get-Command cmake -ErrorAction SilentlyContinue
+          src\cpp\lemonade.msi
 
-          if (-not $cmakeInstalled) {
-              Write-Host "CMake not found, installing..." -ForegroundColor Yellow
-
-              # Download CMake installer
-              $cmakeVersion = "3.28.1"
-              $cmakeUrl = "https://github.com/Kitware/CMake/releases/download/v$cmakeVersion/cmake-$cmakeVersion-windows-x86_64.msi"
-              $cmakeInstaller = "cmake-installer.msi"
-
-              Invoke-WebRequest -Uri $cmakeUrl -OutFile $cmakeInstaller
-
-              # Install CMake silently
-              Start-Process msiexec.exe -ArgumentList "/i $cmakeInstaller /quiet /norestart" -Wait
-
-              # Add CMake to PATH for this session AND future steps
-              $cmakePath = "C:\Program Files\CMake\bin"
-              $env:PATH = "$cmakePath;$env:PATH"
-
-              # Persist to GITHUB_PATH for future steps
-              echo $cmakePath >> $env:GITHUB_PATH
-
-              # Verify installation
-              cmake --version
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Host "ERROR: CMake installation failed!" -ForegroundColor Red
-                  exit 1
-              }
-
-              Write-Host "CMake installed successfully and added to PATH!" -ForegroundColor Green
-          } else {
-              Write-Host "CMake is already installed:" -ForegroundColor Green
-              cmake --version
-          }
-
-      - name: Install WiX Toolset 5.0.2 (CLI)
-        shell: PowerShell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "Downloading WiX Toolset 5.0.2 CLI..." -ForegroundColor Cyan
-          $wixUri = "https://github.com/wixtoolset/wix/releases/download/v5.0.2/wix-cli-x64.msi"
-          $msiPath = "$env:RUNNER_TEMP\wix-cli-x64.msi"
-
-          Invoke-WebRequest -UseBasicParsing -Uri $wixUri -OutFile $msiPath
-
-          Write-Host "Installing WiX Toolset 5.0.2 CLI..." -ForegroundColor Cyan
-          $p = Start-Process "msiexec.exe" -ArgumentList @("/i", "`"$msiPath`"", "/qn", "/norestart") -PassThru -Wait
-          if ($p.ExitCode -ne 0) {
-            Write-Host "WiX installer exited with code $($p.ExitCode)" -ForegroundColor Red
-            exit $p.ExitCode
-          }
-
-      - name: Verify WiX installation
-        shell: PowerShell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          # WiX CLI MSI does not always add itself to PATH in non-interactive installs,
-          # so we locate it explicitly and then update PATH for subsequent steps.
-          $wixDirs = @(
-            "C:\Program Files\WiX Toolset v5.0\bin",
-            "C:\Program Files (x86)\WiX Toolset v5.0\bin"
-          )
-
-          $wixExe = $null
-          foreach ($dir in $wixDirs) {
-            if (Test-Path (Join-Path $dir "wix.exe")) {
-              $wixExe = Join-Path $dir "wix.exe"
-              break
-            }
-          }
-
-          if (-not $wixExe) {
-            Write-Host "ERROR: wix.exe not found after installation." -ForegroundColor Red
-            Get-ChildItem -Recurse "C:\Program Files" -Filter wix.exe -ErrorAction SilentlyContinue | Select-Object -First 20 | Format-List FullName
-            exit 1
-          }
-
-          $wixDir = Split-Path $wixExe -Parent
-
-          # Persist wix.exe directory to PATH for all subsequent steps
-          "$wixDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-          Write-Host "Using WiX from: $wixExe" -ForegroundColor Green
-          & $wixExe --version
-
-      - name: Build C++ Server with CMake
-        shell: PowerShell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "Building lemonade-router and lemonade-server..." -ForegroundColor Cyan
-
-          cd src\cpp
-
-          # Create build directory
-          if (Test-Path "build") {
-              Remove-Item -Recurse -Force "build"
-          }
-          mkdir build
-          cd build
-
-          # Configure
-          cmake .. -G "Visual Studio 17 2022" -A x64
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          # Build
-          cmake --build . --config Release
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          # Verify binaries exist
-          if (-not (Test-Path "Release\lemonade-router.exe")) {
-              Write-Host "ERROR: lemonade-router.exe not found!" -ForegroundColor Red
-              exit 1
-          }
-
-          if (-not (Test-Path "Release\lemonade-server.exe")) {
-              Write-Host "ERROR: lemonade-server.exe not found!" -ForegroundColor Red
-              exit 1
-          }
-
-          if (-not (Test-Path "Release\lemonade-tray.exe")) {
-              Write-Host "ERROR: lemonade-tray.exe not found!" -ForegroundColor Red
-              exit 1
-          }
-
-          Write-Host "C++ build successful!" -ForegroundColor Green
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Build Electron App
-        shell: PowerShell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "Building Electron app..." -ForegroundColor Cyan
-
-          cd src\app
-
-          # Install dependencies
-          Write-Host "Installing npm dependencies..." -ForegroundColor Yellow
-          npm install
-          if ($LASTEXITCODE -ne 0) {
-              Write-Host "ERROR: npm install failed!" -ForegroundColor Red
-              exit $LASTEXITCODE
-          }
-
-          # Build the Electron app for Windows
-          Write-Host "Building Electron app for Windows..." -ForegroundColor Yellow
-          npm run build:win
-          if ($LASTEXITCODE -ne 0) {
-              Write-Host "ERROR: Electron app build failed!" -ForegroundColor Red
-              exit $LASTEXITCODE
-          }
-
-          # Verify the build output exists
-          if (-not (Test-Path "dist-app\win-unpacked\Lemonade.exe")) {
-              Write-Host "ERROR: Electron app executable not found!" -ForegroundColor Red
-              exit 1
-          }
-
-          Write-Host "Electron app build successful!" -ForegroundColor Green
-
-      - name: Build the Lemonade Server Installer
-        shell: PowerShell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          cd src\cpp
-
-          # Run the build installer script
-          .\build_installer.ps1
-
-          # Verify installers were created
-          if (-not (Test-Path "lemonade-server-minimal.msi")) {
-              Write-Host "ERROR: Minimal installer not created!" -ForegroundColor Red
-              exit 1
-          }
-
-          if (-not (Test-Path "lemonade.msi")) {
-              Write-Host "ERROR: Full installer not created!" -ForegroundColor Red
-              exit 1
-          }
-
-          Write-Host "Installers created successfully!" -ForegroundColor Green
-
-      - name: Upload Lemonade Server Installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lemonade_Server_MSI
-          path: |
-            src\cpp\lemonade-server-minimal.msi
-            src\cpp\lemonade.msi
-          retention-days: 7
-
+          '
+        retention-days: 7
   build-lemonade-server-deb:
     name: Build Lemonade Server .deb Package
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          clean: true
-          fetch-depth: 0
-
-      - name: Get version from CMakeLists.txt
-        id: get_version
-        uses: ./.github/actions/get-version
-
-      - name: Build Linux .deb package (minimal)
-        uses: ./.github/actions/build-linux-deb
-        with:
-          include-electron: 'false'
-
-      - name: Upload .deb package
-        uses: actions/upload-artifact@v4
-        with:
-          name: lemonade-server-deb
-          path: src/cpp/build/lemonade-server-minimal_${{ env.LEMONADE_VERSION }}_amd64.deb
-          retention-days: 7
-
+    - uses: actions/checkout@v4
+      with:
+        clean: true
+        fetch-depth: 0
+    - name: Get version from CMakeLists.txt
+      id: get_version
+      uses: ./.github/actions/get-version
+    - name: Build Linux .deb package (minimal)
+      uses: ./.github/actions/build-linux-deb
+      with:
+        include-electron: false
+    - name: Upload .deb package
+      uses: actions/upload-artifact@v4
+      with:
+        name: lemonade-server-deb
+        path: src/cpp/build/lemonade-server-minimal_${{ env.LEMONADE_VERSION }}_amd64.deb
+        retention-days: 7
   build-lemonade-deb-full:
     name: Build Lemonade Full .deb Package (with Electron App)
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          clean: true
-          fetch-depth: 0
-
-      - name: Get version from CMakeLists.txt
-        id: get_version
-        uses: ./.github/actions/get-version
-
-      - name: Build Linux .deb package (full with Electron)
-        uses: ./.github/actions/build-linux-deb
-        with:
-          include-electron: 'true'
-
-      - name: Upload full .deb package
-        uses: actions/upload-artifact@v4
-        with:
-          name: lemonade-deb-full
-          path: src/cpp/build/lemonade_${{ env.LEMONADE_VERSION }}_amd64.deb
-          retention-days: 7
-
-  # ========================================================================
-  # TEST JOBS - Inference tests on self-hosted runners
-  # ========================================================================
-
+    - uses: actions/checkout@v4
+      with:
+        clean: true
+        fetch-depth: 0
+    - name: Get version from CMakeLists.txt
+      id: get_version
+      uses: ./.github/actions/get-version
+    - name: Build Linux .deb package (full with Electron)
+      uses: ./.github/actions/build-linux-deb
+      with:
+        include-electron: true
+    - name: Upload full .deb package
+      uses: actions/upload-artifact@v4
+      with:
+        name: lemonade-deb-full
+        path: src/cpp/build/lemonade_${{ env.LEMONADE_VERSION }}_amd64.deb
+        retention-days: 7
   test-exe-inference:
     name: Test .exe - ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
@@ -295,116 +163,107 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # LLM - Llamacpp backends
-          - name: llamacpp (vulkan)
-            test_type: llm
-            wrapped_server: llamacpp
-            backend: vulkan
-            runner: [rai300_400, Windows]
-          - name: llamacpp (rocm)
-            test_type: llm
-            wrapped_server: llamacpp
-            backend: rocm
-            runner: [stx-halo, Windows]
-          # LLM - RyzenAI backends
-          - name: ryzenai (cpu)
-            test_type: llm
-            wrapped_server: ryzenai
-            backend: cpu
-            runner: [rai300_400, Windows]
-          - name: ryzenai (hybrid)
-            test_type: llm
-            wrapped_server: ryzenai
-            backend: hybrid
-            runner: [rai300_400, Windows]
-          - name: ryzenai (npu)
-            test_type: llm
-            wrapped_server: ryzenai
-            backend: npu
-            runner: [rai300_400, Windows]
-          # LLM - FLM
-          - name: flm
-            test_type: llm
-            wrapped_server: flm
-            backend: ""
-            runner: [rai300_400, Windows]
-          # Whisper
-          - name: whisper
-            test_type: whisper
-            runner: [rai300_400, Windows]
-          # Stable Diffusion
-          - name: stable-diffusion
-            test_type: sd
-            runner: [rai300_400, Windows]
+        - name: llamacpp (vulkan)
+          test_type: llm
+          wrapped_server: llamacpp
+          backend: vulkan
+          runner:
+          - rai300_400
+          - Windows
+        - name: llamacpp (rocm)
+          test_type: llm
+          wrapped_server: llamacpp
+          backend: rocm
+          runner:
+          - stx-halo
+          - Windows
+        - name: ryzenai (cpu)
+          test_type: llm
+          wrapped_server: ryzenai
+          backend: cpu
+          runner:
+          - rai300_400
+          - Windows
+        - name: ryzenai (hybrid)
+          test_type: llm
+          wrapped_server: ryzenai
+          backend: hybrid
+          runner:
+          - rai300_400
+          - Windows
+        - name: ryzenai (npu)
+          test_type: llm
+          wrapped_server: ryzenai
+          backend: npu
+          runner:
+          - rai300_400
+          - Windows
+        - name: flm
+          test_type: llm
+          wrapped_server: flm
+          backend: ''
+          runner:
+          - rai300_400
+          - Windows
+        - name: whisper
+          test_type: whisper
+          runner:
+          - rai300_400
+          - Windows
+        - name: stable-diffusion
+          test_type: sd
+          runner:
+          - rai300_400
+          - Windows
     env:
-      LEMONADE_CI_MODE: "True"
-      LEMONADE_CACHE_DIR: ".\\ci-cache"
+      LEMONADE_CI_MODE: True
+      LEMONADE_CACHE_DIR: .\ci-cache
       PYTHONIOENCODING: utf-8
       GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    - name: Cleanup processes
+      uses: ./.github/actions/cleanup-processes-windows
+    - name: Set environment variables
+      shell: PowerShell
+      run: '$cwd = (Get-Item .\).FullName
 
-      - name: Cleanup processes
-        uses: ./.github/actions/cleanup-processes-windows
+        echo "HF_HOME=$cwd\hf-cache" >> $Env:GITHUB_ENV
 
-      - name: Set environment variables
-        shell: PowerShell
-        run: |
-          $cwd = (Get-Item .\).FullName
-          echo "HF_HOME=$cwd\hf-cache" >> $Env:GITHUB_ENV
-          echo "LEMONADE_INSTALL_PATH=$cwd\lemonade_server_install" >> $Env:GITHUB_ENV
+        echo "LEMONADE_INSTALL_PATH=$cwd\lemonade_server_install" >> $Env:GITHUB_ENV
 
-      - name: Install and Verify Lemonade Server
-        uses: ./.github/actions/install-lemonade-server-msi
-        with:
-          install-path: ${{ env.LEMONADE_INSTALL_PATH }}
-
-      - name: Setup Python and virtual environment
-        uses: ./.github/actions/setup-venv
-        with:
-          venv-name: '.venv'
-          python-version: '3.10'
-          requirements-file: 'test/requirements.txt'
-
-      - name: Run tests
-        shell: PowerShell
-        env:
-          HF_HOME: ${{ env.HF_HOME }}
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $venvPython = ".\.venv\Scripts\python.exe"
-          $serverExe = Join-Path $env:LEMONADE_INSTALL_PATH "bin\lemonade-server.exe"
-
-          Write-Host "Running ${{ matrix.name }} tests..." -ForegroundColor Cyan
-
-          switch ("${{ matrix.test_type }}") {
-              "llm" {
-                  if ("${{ matrix.backend }}") {
-                      & $venvPython test/server_llm.py --wrapped-server ${{ matrix.wrapped_server }} --backend ${{ matrix.backend }} --server-binary $serverExe
-                  } else {
-                      & $venvPython test/server_llm.py --wrapped-server ${{ matrix.wrapped_server }} --server-binary $serverExe
-                  }
-              }
-              "whisper" {
-                  & $venvPython test/server_whisper.py --server-binary $serverExe
-              }
-              "sd" {
-                  & $venvPython test/server_sd.py --server-binary $serverExe
-              }
-          }
-
-          if ($LASTEXITCODE -ne 0) {
-              Write-Host "ERROR: ${{ matrix.name }} tests FAILED with exit code: $LASTEXITCODE" -ForegroundColor Red
-              exit $LASTEXITCODE
-          }
-
-          Write-Host "${{ matrix.name }} tests PASSED!" -ForegroundColor Green
-
-      - name: Cleanup
-        if: always()
-        uses: ./.github/actions/cleanup-processes-windows
-
+        '
+    - name: Install and Verify Lemonade Server
+      uses: ./.github/actions/install-lemonade-server-msi
+      with:
+        install-path: ${{ env.LEMONADE_INSTALL_PATH }}
+    - name: Setup Python and virtual environment
+      uses: ./.github/actions/setup-venv
+      with:
+        venv-name: .venv
+        python-version: '3.10'
+        requirements-file: test/requirements.txt
+    - name: Run tests
+      shell: PowerShell
+      env:
+        HF_HOME: ${{ env.HF_HOME }}
+      run: "$ErrorActionPreference = \"Stop\"\n\n$venvPython = \".\\.venv\\Scripts\\\
+        python.exe\"\n$serverExe = Join-Path $env:LEMONADE_INSTALL_PATH \"bin\\lemonade-server.exe\"\
+        \n\nWrite-Host \"Running ${{ matrix.name }} tests...\" -ForegroundColor Cyan\n\
+        \nswitch (\"${{ matrix.test_type }}\") {\n    \"llm\" {\n        if (\"${{\
+        \ matrix.backend }}\") {\n            & $venvPython test/server_llm.py --wrapped-server\
+        \ ${{ matrix.wrapped_server }} --backend ${{ matrix.backend }} --server-binary\
+        \ $serverExe\n        } else {\n            & $venvPython test/server_llm.py\
+        \ --wrapped-server ${{ matrix.wrapped_server }} --server-binary $serverExe\n\
+        \        }\n    }\n    \"whisper\" {\n        & $venvPython test/server_whisper.py\
+        \ --server-binary $serverExe\n    }\n    \"sd\" {\n        & $venvPython test/server_sd.py\
+        \ --server-binary $serverExe\n    }\n}\n\nif ($LASTEXITCODE -ne 0) {\n   \
+        \ Write-Host \"ERROR: ${{ matrix.name }} tests FAILED with exit code: $LASTEXITCODE\"\
+        \ -ForegroundColor Red\n    exit $LASTEXITCODE\n}\n\nWrite-Host \"${{ matrix.name\
+        \ }} tests PASSED!\" -ForegroundColor Green\n"
+    - name: Cleanup
+      if: always()
+      uses: ./.github/actions/cleanup-processes-windows
   test-deb-inference:
     name: Test .deb - ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
@@ -413,248 +272,211 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # LLM - Llamacpp backends
-          - name: llamacpp (vulkan)
-            test_type: llm
-            backend: vulkan
-            runner: [rai300_400, Linux]
-          - name: llamacpp (rocm)
-            test_type: llm
-            backend: rocm
-            runner: [stx-halo, Linux]
-          # Stable Diffusion
-          - name: stable-diffusion
-            test_type: sd
-            runner: [rai300_400, Linux]
+        - name: llamacpp (vulkan)
+          test_type: llm
+          backend: vulkan
+          runner:
+          - rai300_400
+          - Linux
+        - name: llamacpp (rocm)
+          test_type: llm
+          backend: rocm
+          runner:
+          - stx-halo
+          - Linux
+        - name: stable-diffusion
+          test_type: sd
+          runner:
+          - rai300_400
+          - Linux
     env:
-      LEMONADE_CI_MODE: "True"
+      LEMONADE_CI_MODE: True
       PYTHONIOENCODING: utf-8
       GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
       LEMONADE_VERSION: ${{ needs.build-lemonade-server-deb.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Cleanup processes
-        uses: ./.github/actions/cleanup-processes-linux
-
-      - name: Set HF_HOME environment variable
-        run: echo "HF_HOME=$PWD/hf-cache" >> $GITHUB_ENV
-
-      - name: Install Lemonade Server (.deb)
-        uses: ./.github/actions/install-lemonade-server-deb
-        with:
-          version: ${{ env.LEMONADE_VERSION }}
-
-      - name: Setup Python and virtual environment
-        uses: ./.github/actions/setup-venv
-        with:
-          venv-name: '.venv'
-          python-version: '3.10'
-          requirements-file: 'test/requirements.txt'
-
-      - name: Run tests
-        env:
-          HF_HOME: ${{ env.HF_HOME }}
-        run: |
-          set -e  # Exit on error
-
-          VENV_PYTHON=".venv/bin/python"
-
-          echo "Running ${{ matrix.name }} tests..."
-
-          case "${{ matrix.test_type }}" in
-            llm)
-              $VENV_PYTHON test/server_llm.py --wrapped-server llamacpp --backend ${{ matrix.backend }} --server-binary lemonade-server
-              ;;
-            sd)
-              $VENV_PYTHON test/server_sd.py --server-binary lemonade-server
-              ;;
-          esac
-
-          echo "${{ matrix.name }} tests PASSED!"
-
-      - name: Print server logs on failure
-        if: failure()
-        run: |
-          echo "=== Server Log (if exists) ==="
-          if [ -f /tmp/lemonade-server.log ]; then
-            echo "Last 100 lines of /tmp/lemonade-server.log:"
-            tail -100 /tmp/lemonade-server.log
-          else
-            echo "Log file /tmp/lemonade-server.log not found"
-          fi
-
-          echo ""
-          echo "=== Router PID file (if exists) ==="
-          if [ -f /tmp/lemonade-router.pid ]; then
-            cat /tmp/lemonade-router.pid
-          else
-            echo "PID file not found"
-          fi
-
-          echo ""
-          echo "=== Lock file status ==="
-          ls -la /tmp/lemonade*.lock 2>/dev/null || echo "No lock files found"
-
-      - name: Cleanup
-        if: always()
-        uses: ./.github/actions/cleanup-processes-linux
-
-  # ========================================================================
-  # CLI AND ENDPOINTS TESTS - Run on GitHub-hosted runners (no GPU needed)
-  # ========================================================================
-
+    - uses: actions/checkout@v4
+    - name: Cleanup processes
+      uses: ./.github/actions/cleanup-processes-linux
+    - name: Set HF_HOME environment variable
+      run: echo "HF_HOME=$PWD/hf-cache" >> $GITHUB_ENV
+    - name: Install Lemonade Server (.deb)
+      uses: ./.github/actions/install-lemonade-server-deb
+      with:
+        version: ${{ env.LEMONADE_VERSION }}
+    - name: Setup Python and virtual environment
+      uses: ./.github/actions/setup-venv
+      with:
+        venv-name: .venv
+        python-version: '3.10'
+        requirements-file: test/requirements.txt
+    - name: Run tests
+      env:
+        HF_HOME: ${{ env.HF_HOME }}
+      run: "set -e  # Exit on error\n\nVENV_PYTHON=\".venv/bin/python\"\n\necho \"\
+        Running ${{ matrix.name }} tests...\"\n\ncase \"${{ matrix.test_type }}\"\
+        \ in\n  llm)\n    $VENV_PYTHON test/server_llm.py --wrapped-server llamacpp\
+        \ --backend ${{ matrix.backend }} --server-binary lemonade-server\n    ;;\n\
+        \  sd)\n    $VENV_PYTHON test/server_sd.py --server-binary lemonade-server\n\
+        \    ;;\nesac\n\necho \"${{ matrix.name }} tests PASSED!\"\n"
+    - name: Print server logs on failure
+      if: failure()
+      run: "echo \"=== Server Log (if exists) ===\"\nif [ -f /tmp/lemonade-server.log\
+        \ ]; then\n  echo \"Last 100 lines of /tmp/lemonade-server.log:\"\n  tail\
+        \ -100 /tmp/lemonade-server.log\nelse\n  echo \"Log file /tmp/lemonade-server.log\
+        \ not found\"\nfi\n\necho \"\"\necho \"=== Router PID file (if exists) ===\"\
+        \nif [ -f /tmp/lemonade-router.pid ]; then\n  cat /tmp/lemonade-router.pid\n\
+        else\n  echo \"PID file not found\"\nfi\n\necho \"\"\necho \"=== Lock file\
+        \ status ===\"\nls -la /tmp/lemonade*.lock 2>/dev/null || echo \"No lock files\
+        \ found\"\n"
+    - name: Cleanup
+      if: always()
+      uses: ./.github/actions/cleanup-processes-linux
   test-cli-endpoints:
     name: Test ${{ matrix.test_type }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs:
-      - build-lemonade-server-installer
-      - build-lemonade-server-deb
+    - build-lemonade-server-installer
+    - build-lemonade-server-deb
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        test_type: [cli, endpoints]
+        os:
+        - ubuntu-latest
+        - windows-latest
+        test_type:
+        - cli
+        - endpoints
     env:
-      LEMONADE_CI_MODE: "True"
+      LEMONADE_CI_MODE: True
       PYTHONIOENCODING: utf-8
       GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
       LEMONADE_VERSION: ${{ needs.build-lemonade-server-deb.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    - name: Install Lemonade Server (.deb)
+      if: runner.os == 'Linux'
+      uses: ./.github/actions/install-lemonade-server-deb
+      with:
+        version: ${{ env.LEMONADE_VERSION }}
+    - name: Set environment (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: 'echo "HF_HOME=$PWD/hf-cache" >> $GITHUB_ENV
 
-      # ---- Linux Setup ----
-      - name: Install Lemonade Server (.deb)
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/install-lemonade-server-deb
-        with:
-          version: ${{ env.LEMONADE_VERSION }}
+        echo "VENV_PYTHON=.venv/bin/python" >> $GITHUB_ENV
 
-      - name: Set environment (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          echo "HF_HOME=$PWD/hf-cache" >> $GITHUB_ENV
-          echo "VENV_PYTHON=.venv/bin/python" >> $GITHUB_ENV
-          echo "SERVER_BINARY=lemonade-server" >> $GITHUB_ENV
+        echo "SERVER_BINARY=lemonade-server" >> $GITHUB_ENV
 
-      # ---- Windows Setup ----
-      - name: Setup (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $cwd = (Get-Item .).FullName
-          echo "HF_HOME=$cwd\hf-cache" >> $Env:GITHUB_ENV
-          echo "LEMONADE_INSTALL_PATH=$cwd\lemonade_server_install" >> $Env:GITHUB_ENV
+        '
+    - name: Setup (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: '$cwd = (Get-Item .).FullName
 
-      - name: Install Lemonade Server (Windows)
-        if: runner.os == 'Windows'
-        uses: ./.github/actions/install-lemonade-server-msi
-        with:
-          install-path: ${{ env.LEMONADE_INSTALL_PATH }}
+        echo "HF_HOME=$cwd\hf-cache" >> $Env:GITHUB_ENV
 
-      - name: Set paths (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          echo "VENV_PYTHON=.venv/Scripts/python.exe" >> $Env:GITHUB_ENV
-          echo "SERVER_BINARY=$Env:LEMONADE_INSTALL_PATH\bin\lemonade-server.exe" >> $Env:GITHUB_ENV
+        echo "LEMONADE_INSTALL_PATH=$cwd\lemonade_server_install" >> $Env:GITHUB_ENV
 
-      # ---- Common Setup ----
-      - name: Setup Python and virtual environment
-        uses: ./.github/actions/setup-venv
-        with:
-          venv-name: '.venv'
-          python-version: '3.10'
-          requirements-file: 'test/requirements.txt'
+        '
+    - name: Install Lemonade Server (Windows)
+      if: runner.os == 'Windows'
+      uses: ./.github/actions/install-lemonade-server-msi
+      with:
+        install-path: ${{ env.LEMONADE_INSTALL_PATH }}
+    - name: Set paths (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: 'echo "VENV_PYTHON=.venv/Scripts/python.exe" >> $Env:GITHUB_ENV
 
-      # ---- Run Tests ----
-      - name: Run ${{ matrix.test_type }} tests
-        shell: bash
-        env:
-          HF_HOME: ${{ env.HF_HOME }}
-        run: |
-          set -e  # Exit on error
+        echo "SERVER_BINARY=$Env:LEMONADE_INSTALL_PATH\bin\lemonade-server.exe" >>
+        $Env:GITHUB_ENV
 
-          if [ "${{ matrix.test_type }}" = "cli" ]; then
-              echo "Running CLI tests..."
-              $VENV_PYTHON test/server_cli.py --server-binary "$SERVER_BINARY"
-              $VENV_PYTHON test/server_cli.py --server-binary "$SERVER_BINARY" --ephemeral
-              $VENV_PYTHON test/server_cli.py --server-binary "$SERVER_BINARY" --listen-all
-              $VENV_PYTHON test/server_cli.py --server-binary "$SERVER_BINARY" --api-key
-          else
-              echo "Running endpoint tests..."
-              $VENV_PYTHON test/server_endpoints.py --server-binary "$SERVER_BINARY"
-              $VENV_PYTHON test/server_endpoints.py --server-binary "$SERVER_BINARY" --server-per-test
-          fi
-
-          echo "${{ matrix.test_type }} tests PASSED!"
-
-  # ========================================================================
-  # RELEASE JOB - Add artifacts to GitHub release
-  # ========================================================================
-
+        '
+    - name: Setup Python and virtual environment
+      uses: ./.github/actions/setup-venv
+      with:
+        venv-name: .venv
+        python-version: '3.10'
+        requirements-file: test/requirements.txt
+    - name: Run ${{ matrix.test_type }} tests
+      shell: bash
+      env:
+        HF_HOME: ${{ env.HF_HOME }}
+      run: "set -e  # Exit on error\n\nif [ \"${{ matrix.test_type }}\" = \"cli\"\
+        \ ]; then\n    echo \"Running CLI tests...\"\n    $VENV_PYTHON test/server_cli.py\
+        \ --server-binary \"$SERVER_BINARY\"\n    $VENV_PYTHON test/server_cli.py\
+        \ --server-binary \"$SERVER_BINARY\" --ephemeral\n    $VENV_PYTHON test/server_cli.py\
+        \ --server-binary \"$SERVER_BINARY\" --listen-all\n    $VENV_PYTHON test/server_cli.py\
+        \ --server-binary \"$SERVER_BINARY\" --api-key\nelse\n    echo \"Running endpoint\
+        \ tests...\"\n    $VENV_PYTHON test/server_endpoints.py --server-binary \"\
+        $SERVER_BINARY\"\n    $VENV_PYTHON test/server_endpoints.py --server-binary\
+        \ \"$SERVER_BINARY\" --server-per-test\nfi\n\necho \"${{ matrix.test_type\
+        \ }} tests PASSED!\"\n"
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs:
-      - build-lemonade-server-installer
-      - build-lemonade-server-deb
-      - build-lemonade-deb-full
-      - test-exe-inference
-      - test-deb-inference
-      - test-cli-endpoints
+    - build-lemonade-server-installer
+    - build-lemonade-server-deb
+    - build-lemonade-deb-full
+    - test-exe-inference
+    - test-deb-inference
+    - test-cli-endpoints
     if: startsWith(github.ref, 'refs/tags/v')
     env:
       LEMONADE_VERSION: ${{ needs.build-lemonade-server-deb.outputs.version }}
     steps:
-      - name: Checkout for release notes action
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: .github
+    - name: Checkout for release notes action
+      uses: actions/checkout@v4
+      with:
+        sparse-checkout: .github
+    - name: Download Lemonade Server Installer (Windows)
+      uses: actions/download-artifact@v4
+      with:
+        name: Lemonade_Server_MSI
+        path: .
+    - name: Download Lemonade Server .deb Package (Linux - Minimal)
+      uses: actions/download-artifact@v4
+      with:
+        name: lemonade-server-deb
+        path: .
+    - name: Download Lemonade Full .deb Package (Linux - with Electron App)
+      uses: actions/download-artifact@v4
+      with:
+        name: lemonade-deb-full
+        path: .
+    - name: Verify release artifacts
+      run: 'echo "Release artifacts:"
 
-      - name: Download Lemonade Server Installer (Windows)
-        uses: actions/download-artifact@v4
-        with:
-          name: Lemonade_Server_MSI
-          path: .
+        ls -lh lemonade-server-minimal.msi
 
-      - name: Download Lemonade Server .deb Package (Linux - Minimal)
-        uses: actions/download-artifact@v4
-        with:
-          name: lemonade-server-deb
-          path: .
+        ls -lh lemonade.msi
 
-      - name: Download Lemonade Full .deb Package (Linux - with Electron App)
-        uses: actions/download-artifact@v4
-        with:
-          name: lemonade-deb-full
-          path: .
+        ls -lh lemonade-server-minimal_${LEMONADE_VERSION}_amd64.deb
 
-      - name: Verify release artifacts
-        run: |
-          echo "Release artifacts:"
-          ls -lh lemonade-server-minimal.msi
-          ls -lh lemonade.msi
-          ls -lh lemonade-server-minimal_${LEMONADE_VERSION}_amd64.deb
-          ls -lh lemonade_${LEMONADE_VERSION}_amd64.deb
+        ls -lh lemonade_${LEMONADE_VERSION}_amd64.deb
 
-      - name: Generate release notes
-        id: release-notes
-        uses: ./.github/actions/generate-release-notes
-        with:
-          version: ${{ env.LEMONADE_VERSION }}
-          repo: ${{ github.repository }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+        '
+    - name: Generate release notes
+      id: release-notes
+      uses: ./.github/actions/generate-release-notes
+      with:
+        version: ${{ env.LEMONADE_VERSION }}
+        repo: ${{ github.repository }}
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: ${{ github.ref_name }}
+        body_path: ${{ steps.release-notes.outputs.release_notes_file }}
+        files: 'lemonade-server-minimal.msi
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ github.ref_name }}
-          body_path: ${{ steps.release-notes.outputs.release_notes_file }}
-          files: |
-            lemonade-server-minimal.msi
-            lemonade.msi
-            lemonade-server-minimal_${{ env.LEMONADE_VERSION }}_amd64.deb
-            lemonade_${{ env.LEMONADE_VERSION }}_amd64.deb
-          fail_on_unmatched_files: true
+          lemonade.msi
+
+          lemonade-server-minimal_${{ env.LEMONADE_VERSION }}_amd64.deb
+
+          lemonade_${{ env.LEMONADE_VERSION }}_amd64.deb
+
+          '
+        fail_on_unmatched_files: true
