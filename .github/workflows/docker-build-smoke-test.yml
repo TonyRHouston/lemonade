@@ -1,68 +1,38 @@
 name: Docker Build Smoke Test
-
 on:
-  pull_request:
-
+  workflow_dispatch: {}
 permissions:
   contents: read
-
 jobs:
   docker-smoke-test:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Build Docker image
+      run: 'docker build -t lemonade:test .
 
-      - name: Build Docker image
-        run: |
-          docker build -t lemonade:test .
+        '
+    - name: Run container
+      run: "docker run -d \\\n  --name lemonade-test \\\n  -p 8000:8000 \\\n  lemonade:test\n"
+    - name: Wait for server to be ready
+      run: "echo \"Waiting for Lemonade to start...\"\nfor i in {1..30}; do\n  if\
+        \ curl -sf http://localhost:8000/live > /dev/null; then\n    echo \"Server\
+        \ is up\"\n    exit 0\n  fi\n  sleep 2\ndone\necho \"Server did not start\
+        \ in time\"\ndocker logs lemonade-test\nexit 1\n"
+    - name: Load model
+      run: "curl -X POST http://localhost:8000/api/v1/load \\\n  -H \"Content-Type:\
+        \ application/json\" \\\n  -d '{\"model_name\": \"Qwen3-0.6B-GGUF\"}'\n"
+    - name: Chat completion smoke test
+      run: "RESPONSE=$(curl -s http://localhost:8000/api/v1/chat/completions \\\n\
+        \  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"model\": \"Qwen3-0.6B-GGUF\"\
+        ,\n    \"messages\": [\n      { \"role\": \"user\", \"content\": \"Hello,\
+        \ Lemonade!\" }\n    ]\n  }')\n\necho \"Response:\"\necho \"$RESPONSE\"\n\n\
+        echo \"$RESPONSE\" | grep -q '\"choices\"' || exit 1\n"
+    - name: Cleanup
+      if: always()
+      run: 'docker logs lemonade-test || true
 
-      - name: Run container
-        run: |
-          docker run -d \
-            --name lemonade-test \
-            -p 8000:8000 \
-            lemonade:test
+        docker rm -f lemonade-test || true
 
-      - name: Wait for server to be ready
-        run: |
-          echo "Waiting for Lemonade to start..."
-          for i in {1..30}; do
-            if curl -sf http://localhost:8000/live > /dev/null; then
-              echo "Server is up"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "Server did not start in time"
-          docker logs lemonade-test
-          exit 1
-
-      - name: Load model
-        run: |
-          curl -X POST http://localhost:8000/api/v1/load \
-            -H "Content-Type: application/json" \
-            -d '{"model_name": "Qwen3-0.6B-GGUF"}'
-
-      - name: Chat completion smoke test
-        run: |
-          RESPONSE=$(curl -s http://localhost:8000/api/v1/chat/completions \
-            -H "Content-Type: application/json" \
-            -d '{
-              "model": "Qwen3-0.6B-GGUF",
-              "messages": [
-                { "role": "user", "content": "Hello, Lemonade!" }
-              ]
-            }')
-
-          echo "Response:"
-          echo "$RESPONSE"
-
-          echo "$RESPONSE" | grep -q '"choices"' || exit 1
-
-      - name: Cleanup
-        if: always()
-        run: |
-          docker logs lemonade-test || true
-          docker rm -f lemonade-test || true
+        '
