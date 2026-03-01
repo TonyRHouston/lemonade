@@ -6,7 +6,7 @@ permissions:
 jobs:
   build-lemonade-server-installer:
     name: Build Lemonade Server Installer
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
       with:
@@ -157,7 +157,7 @@ jobs:
         retention-days: 7
   test-exe-inference:
     name: Test .exe - ${{ matrix.name }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     needs: build-lemonade-server-installer
     strategy:
       fail-fast: false
@@ -266,7 +266,7 @@ jobs:
       uses: ./.github/actions/cleanup-processes-windows
   test-deb-inference:
     name: Test .deb - ${{ matrix.name }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     needs: build-lemonade-server-deb
     strategy:
       fail-fast: false
@@ -334,7 +334,7 @@ jobs:
       uses: ./.github/actions/cleanup-processes-linux
   test-cli-endpoints:
     name: Test ${{ matrix.test_type }} (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     needs:
     - build-lemonade-server-installer
     - build-lemonade-server-deb
