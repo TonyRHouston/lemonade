@@ -20,9 +20,7 @@ jobs:
         - sjlab-stx-halo-13
         - sjlab-stx-0
       fail-fast: false
-    runs-on:
-    - self-hosted
-    - ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     steps:
     - name: Create heartbeat file (Windows)
       if: runner.os == 'Windows'
